@@ -1,368 +1,183 @@
 import csv
-import xml.dom.minidom
-import tkinter as tk
-from tkinter import filedialog, messagebox
 import os
 import re
-import html
-import codecs
+import tkinter as tk
+from tkinter import filedialog
+from tkinter import messagebox
+from xml.dom import minidom
+from xml.etree import ElementTree as ET
 
-def create_cdata_section(doc, text):
-    """指定されたテキストでCDATAセクションを作成する"""
-    if text is None or text == "":
-        return doc.createCDATASection("")
-    return doc.createCDATASection(text)
-
-def wrap_in_html_tags(text, tag_type="p"):
-    """テキストをHTMLタグで囲む"""
-    if text is None or text == "":
-        return ""
-    # すでにHTMLタグがある場合はそのまま返す
-    if re.search(r'<\w+>', text):
-        return text
-    return f"<{tag_type}>{text}</{tag_type}>\n"
-
-def create_list_html(items):
-    """リスト項目からHTMLのリストを作成する"""
-    if not items:
-        return ""
+def split_numbered_steps(actions_text):
+    """番号付きリスト形式のステップを分割する"""
+    if not actions_text:
+        return []
     
-    html_list = "<ol>\n"
-    for item in items:
-        item = item.strip()
-        if item:
-            html_list += f"\t<li>{item}</li>\n"
-    html_list += "</ol>\n"
-    return html_list
-
-def csv_to_xml(csv_file, output_file):
-    """CSVファイルをTestLink XMLに変換する"""
+    # 「1. 〜」「2. 〜」のようなパターンを検出
+    pattern = r'(\d+\.\s*[^0-9.]+?)(?=\d+\.|$)'
+    steps = re.findall(pattern, actions_text)
     
-    # CSVファイルを読み込む（Shift-JIS エンコード）
-    rows = []
+    if not steps:
+        # 番号付きリストが見つからない場合は元のテキストを1つのステップとして返す
+        return [actions_text.strip()]
+    
+    return [step.strip() for step in steps]
+
+def add_cdata_section(parent, tag_name, text):
+    """CDATA セクションを含む要素を追加する"""
+    element = ET.SubElement(parent, tag_name)
+    element.text = f"<![CDATA[{text}]]>"
+    return element
+
+def csv_to_xml(csv_file, xml_file):
+    """TestLink CSV ファイルから XML ファイルを生成する"""
+    # CSVファイルを読み込む
+    test_cases = {}
+    test_suites = {}
+    
     with open(csv_file, 'r', encoding='shift_jis', errors='replace') as file:
         reader = csv.DictReader(file)
-        # 列名を取得
-        fieldnames = reader.fieldnames
+        headers = reader.fieldnames
         
-        # 必須フィールドの確認
-        required_fields = ['testsuite_name', 'testcase_name']
-        for field in required_fields:
-            if field not in fieldnames:
-                raise ValueError(f"CSVファイルに必須フィールド '{field}' がありません")
+        # externalidがヘッダーに存在するか確認
+        has_externalid = 'externalid' in headers
         
-        # オプションフィールドの確認と追加
-        optional_fields = ['testsuite_id', 'testcase_internalid', 'testcase_node_order']
-        
-        # すべての行を読み込む
         for row in reader:
-            rows.append(row)
-    
-    if not rows:
-        raise ValueError("CSVファイルにデータがありません")
-    
-    # XML文書を作成
-    doc = xml.dom.minidom.getDOMImplementation().createDocument(None, "testsuite", None)
-    root = doc.documentElement
-    
-    # テストスイート名と ID を設定
-    testsuite_name = rows[0]['testsuite_name']
-    root.setAttribute("name", testsuite_name)
-    
-    # テストスイートIDが指定されている場合は使用、ない場合は252を使用（元のXMLと同じ値）
-    testsuite_id = "252"  # デフォルト値
-    if 'testsuite_id' in fieldnames and rows[0]['testsuite_id']:
-        testsuite_id = rows[0]['testsuite_id']
-    root.setAttribute("id", testsuite_id)
-    
-    # node_orderとdetailsを追加
-    node_order = doc.createElement("node_order")
-    node_order.appendChild(create_cdata_section(doc, "1"))
-    root.appendChild(node_order)
-    
-    details = doc.createElement("details")
-    details.appendChild(create_cdata_section(doc, ""))
-    root.appendChild(details)
-    
-    # テストケースをグループ化
-    testcases = {}
-    for row in rows:
-        testcase_name = row['testcase_name']
-        if testcase_name not in testcases:
-            testcases[testcase_name] = {
-                'summary': row.get('summary', ''),
-                'preconditions': row.get('preconditions', ''),
-                'execution_type': row.get('execution_type', '1'),
-                'importance': row.get('importance', '2'),
-                'steps': []
-            }
-        
-        # ステップ情報があれば追加
-        step_number = row.get('step_number', '')
-        actions = row.get('actions', '')
-        expected_results = row.get('expected_results', '')
-        
-        if step_number:
-            testcases[testcase_name]['steps'].append({
-                'step_number': step_number,
-                'actions': actions,
-                'expected_results': expected_results
-            })
-    
-    # テストケースをXMLに追加
-    counter = 1
-    for testcase_name, testcase_data in testcases.items():
-        tc_element = doc.createElement("testcase")
-        tc_element.setAttribute("name", testcase_name)
-        
-        # internalidを取得（CSVに存在する場合はその値を使用、ない場合はオリジナルの形式に似た値を使用）
-        internalid = None
-        for row in rows:
-            if row['testcase_name'] == testcase_name and 'testcase_internalid' in row and row['testcase_internalid']:
-                internalid = row['testcase_internalid']
-                break
-                
-        # internalidがない場合は、オリジナルのパターンに近い値を生成
-        if not internalid:
-            # オリジナルでは不規則だが、カウンターの値を4倍して近似値を生成
-            internalid = str(counter * 4 + 8)
+            testsuite_name = row.get('testsuite_name', '')
+            testcase_name = row.get('testcase_name', '')
             
-        tc_element.setAttribute("internalid", internalid)
-        
-        # node_orderの値を取得（CSVに存在する場合）
-        node_order_value = str(counter - 1)  # デフォルト値
-        for row in rows:
-            if row['testcase_name'] == testcase_name and 'testcase_node_order' in row and row['testcase_node_order']:
-                node_order_value = row['testcase_node_order']
-                break
+            # テストスイートの処理
+            if testsuite_name not in test_suites:
+                test_suites[testsuite_name] = True
+            
+            # テストケースの処理
+            case_key = f"{testsuite_name}_{testcase_name}"
+            if case_key not in test_cases:
+                test_cases[case_key] = {
+                    'name': testcase_name,
+                    'testsuite': testsuite_name,
+                    'summary': row.get('summary', ''),
+                    'preconditions': row.get('preconditions', ''),
+                    'execution_type': row.get('execution_type', '1'),
+                    'importance': row.get('importance', '2'),
+                    'externalid': row.get('externalid', '') if has_externalid else '',
+                    'steps': []
+                }
+            
+            # ステップの処理
+            if row.get('actions', ''):
+                actions = row.get('actions', '')
+                expected_results = row.get('expected_results', '')
                 
-        # 基本要素を追加
-        node_order_elem = doc.createElement("node_order")
-        node_order_elem.appendChild(create_cdata_section(doc, node_order_value))
-        tc_element.appendChild(node_order_elem)
+                # 番号付きステップを分割
+                action_steps = split_numbered_steps(actions)
+                
+                # 各ステップをテストケースに追加
+                for i, step_action in enumerate(action_steps):
+                    # 最後のステップにのみ期待結果を設定
+                    step_expected = expected_results if i == len(action_steps) - 1 else ''
+                    
+                    test_cases[case_key]['steps'].append({
+                        'number': i + 1,
+                        'actions': step_action,
+                        'expected_results': step_expected,
+                        'execution_type': '1'
+                    })
+    
+    # XMLを生成
+    # ルート要素（テストスイート）を作成
+    testsuite_name = next(iter(test_suites))
+    root = ET.Element('testsuite', name=testsuite_name)
+    
+    # ノード順序の要素を追加
+    node_order = ET.SubElement(root, 'node_order')
+    node_order.text = "<![CDATA[1]]>"
+    
+    # 詳細の要素を追加
+    details = ET.SubElement(root, 'details')
+    details.text = "<![CDATA[]]>"
+    
+    # テストケースを追加
+    for key, testcase_data in test_cases.items():
+        # テストケース要素
+        testcase = ET.SubElement(root, 'testcase', name=testcase_data['name'], internalid="1")
         
-        externalid_elem = doc.createElement("externalid")
-        externalid_elem.appendChild(create_cdata_section(doc, str(counter)))
-        tc_element.appendChild(externalid_elem)
+        # ノード順序
+        node_order = ET.SubElement(testcase, 'node_order')
+        node_order.text = "<![CDATA[0]]>"
         
-        version_elem = doc.createElement("version")
-        version_elem.appendChild(create_cdata_section(doc, "1"))
-        tc_element.appendChild(version_elem)
+        # 外部ID（存在する場合のみ追加）
+        if has_externalid and testcase_data['externalid']:
+            externalid = ET.SubElement(testcase, 'externalid')
+            externalid.text = f"<![CDATA[{testcase_data['externalid']}]]>"
         
-        # サマリーを追加
-        summary_elem = doc.createElement("summary")
-        summary_text = wrap_in_html_tags(testcase_data['summary'])
-        summary_elem.appendChild(create_cdata_section(doc, summary_text))
-        tc_element.appendChild(summary_elem)
+        # バージョン
+        version = ET.SubElement(testcase, 'version')
+        version.text = "<![CDATA[1]]>"
         
-        # 前提条件を追加
-        preconditions_elem = doc.createElement("preconditions")
-        preconditions_text = wrap_in_html_tags(testcase_data['preconditions'])
-        preconditions_elem.appendChild(create_cdata_section(doc, preconditions_text))
-        tc_element.appendChild(preconditions_elem)
+        # 概要
+        summary = ET.SubElement(testcase, 'summary')
+        summary.text = f"<![CDATA[<p>{testcase_data['summary']}</p>\n]]>"
         
-        # 実行タイプを追加
-        execution_type_elem = doc.createElement("execution_type")
-        execution_type_elem.appendChild(create_cdata_section(doc, testcase_data['execution_type']))
-        tc_element.appendChild(execution_type_elem)
+        # 前提条件
+        preconditions = ET.SubElement(testcase, 'preconditions')
+        preconditions.text = f"<![CDATA[{testcase_data['preconditions']}]]>"
         
-        # 重要度を追加
-        importance_elem = doc.createElement("importance")
-        importance_elem.appendChild(create_cdata_section(doc, testcase_data['importance']))
-        tc_element.appendChild(importance_elem)
+        # 実行タイプ
+        execution_type = ET.SubElement(testcase, 'execution_type')
+        execution_type.text = f"<![CDATA[{testcase_data['execution_type']}]]>"
         
-        # 予定実行時間（オリジナルの形式を維持）
-        estimated_exec_duration = doc.createElement("estimated_exec_duration")
-        # オリジナルのXMLでは空の値もテキストノードとして追加されていた
-        if 'estimated_exec_duration' in testcase_data and testcase_data['estimated_exec_duration']:
-            estimated_exec_duration.appendChild(doc.createTextNode(testcase_data['estimated_exec_duration']))
-        tc_element.appendChild(estimated_exec_duration)
+        # 重要度
+        importance = ET.SubElement(testcase, 'importance')
+        importance.text = f"<![CDATA[{testcase_data['importance']}]]>"
         
-        # ステータス関連の情報
-        status_elem = doc.createElement("status")
-        status_elem.appendChild(doc.createTextNode("1"))
-        tc_element.appendChild(status_elem)
+        # ステータス関連の標準フィールド
+        ET.SubElement(testcase, 'estimated_exec_duration').text = "5.00"
+        ET.SubElement(testcase, 'status').text = "1"
+        ET.SubElement(testcase, 'is_open').text = "1"
+        ET.SubElement(testcase, 'active').text = "1"
         
-        is_open_elem = doc.createElement("is_open")
-        is_open_elem.appendChild(doc.createTextNode("1"))
-        tc_element.appendChild(is_open_elem)
-        
-        active_elem = doc.createElement("active")
-        active_elem.appendChild(doc.createTextNode("1"))
-        tc_element.appendChild(active_elem)
-        
-        # ステップ情報がある場合
+        # ステップを追加（ステップがある場合）
         if testcase_data['steps']:
-            steps_elem = doc.createElement("steps")
+            steps = ET.SubElement(testcase, 'steps')
             
             for step_data in testcase_data['steps']:
-                step_elem = doc.createElement("step")
+                step = ET.SubElement(steps, 'step')
                 
-                # ステップ番号
-                step_number_elem = doc.createElement("step_number")
-                step_number_elem.appendChild(create_cdata_section(doc, step_data['step_number']))
-                step_elem.appendChild(step_number_elem)
+                step_number = ET.SubElement(step, 'step_number')
+                step_number.text = f"<![CDATA[{step_data['number']}]]>"
                 
-                # アクション
-                actions_elem = doc.createElement("actions")
+                actions = ET.SubElement(step, 'actions')
+                actions.text = f"<![CDATA[<p>{step_data['actions']}</p>\n]]>"
                 
-                # アクションテキストの処理
-                actions_text = step_data['actions']
-                if actions_text:
-                    # カンマで区切られたリストの場合、HTMLリストに変換
-                    if "," in actions_text and "<" not in actions_text:
-                        actions_items = [item.strip() for item in actions_text.split(",")]
-                        actions_text = create_list_html(actions_items)
-                    else:
-                        # 通常のテキストの場合
-                        if not re.search(r'<\w+>', actions_text):
-                            actions_text = wrap_in_html_tags(actions_text)
+                expectedresults = ET.SubElement(step, 'expectedresults')
+                expectedresults.text = f"<![CDATA[<p>{step_data['expected_results']}</p>\n]]>" if step_data['expected_results'] else "<![CDATA[]]>"
                 
-                actions_elem.appendChild(create_cdata_section(doc, actions_text))
-                step_elem.appendChild(actions_elem)
-                
-                # 期待結果
-                expected_results_elem = doc.createElement("expectedresults")
-                expected_results_text = wrap_in_html_tags(step_data['expected_results'])
-                expected_results_elem.appendChild(create_cdata_section(doc, expected_results_text))
-                step_elem.appendChild(expected_results_elem)
-                
-                # ステップ実行タイプ
-                step_exec_type_elem = doc.createElement("execution_type")
-                step_exec_type_elem.appendChild(create_cdata_section(doc, "1"))
-                step_elem.appendChild(step_exec_type_elem)
-                
-                steps_elem.appendChild(step_elem)
-            
-            tc_element.appendChild(steps_elem)
-        
-        root.appendChild(tc_element)
-        counter += 1
+                step_execution_type = ET.SubElement(step, 'execution_type')
+                step_execution_type.text = f"<![CDATA[{step_data['execution_type']}]]>"
     
-    # UTF-8でXMLファイルを書き出す（XML宣言を追加）
-    xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
-    formatted_xml = doc.toprettyxml(indent="  ", encoding='utf-8').decode('utf-8')
+    # XMLファイルを保存
+    # きれいな形式にインデントする
+    rough_string = ET.tostring(root, 'utf-8')
+    reparsed = minidom.parseString(rough_string)
+    pretty_xml = reparsed.toprettyxml(indent="  ", encoding="utf-8").decode('utf-8')
     
-    # XML宣言の重複を防ぐ
-    if formatted_xml.startswith('<?xml'):
-        formatted_xml_content = formatted_xml
-    else:
-        formatted_xml_content = xml_declaration + formatted_xml
+    with open(xml_file, 'w', encoding='utf-8') as f:
+        f.write('<?xml version="1.0" encoding="utf-8"?>\n')
+        # XMLの宣言行を除去して書き込む（重複を避けるため）
+        f.write(pretty_xml.split('\n', 1)[1])
     
-    with codecs.open(output_file, 'w', encoding='utf-8') as f:
-        f.write(formatted_xml_content)
-    
-    return output_file
-
-def update_csv_template():
-    """CSVテンプレートファイルを作成して開く"""
-    template_file = "testlink_template.csv"
-    
-    # テンプレートの列名
-    fieldnames = [
-        'testsuite_name', 'testsuite_id', 
-        'testcase_name', 'testcase_internalid', 'testcase_node_order',
-        'summary', 'preconditions', 'execution_type', 'importance',
-        'estimated_exec_duration', 'status', 'is_open', 'active',
-        'step_number', 'actions', 'expected_results'
-    ]
-    
-    # テンプレートCSVを作成
-    with open(template_file, 'w', encoding='shift_jis', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        
-        # サンプル行を追加
-        writer.writerow({
-            'testsuite_name': 'テストスイート名',
-            'testsuite_id': '252',
-            'testcase_name': 'テストケース名',
-            'testcase_internalid': '12',
-            'testcase_node_order': '0',
-            'summary': 'テストケースの概要',
-            'preconditions': '前提条件',
-            'execution_type': '1',
-            'importance': '2',
-            'estimated_exec_duration': '5.00',
-            'status': '1',
-            'is_open': '1',
-            'active': '1',
-            'step_number': '1',
-            'actions': 'アクション1, アクション2',
-            'expected_results': '期待される結果'
-        })
-    
-    # ファイルを開く
-    try:
-        os.startfile(template_file)
-    except:
-        try:
-            import subprocess
-            subprocess.call(['open', template_file])
-        except:
-            pass
-    
-    return template_file
+    return xml_file
 
 def main():
-    # ルートウィンドウを作成
+    # ルートウィンドウを作成して非表示にする
     root = tk.Tk()
-    root.title("TestLink CSV to XML コンバーター")
-    root.geometry("400x200")
+    root.withdraw()
     
-    def select_file():
-        # ファイル選択ダイアログを表示
-        csv_file = filedialog.askopenfilename(
-            title="EXCELで作成したCSVファイルを選択してください",
-            filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")]
-        )
-        
-        if not csv_file:  # ユーザーがキャンセルした場合
-            return
-        
-        # 出力XMLファイルのパスを作成（入力CSVと同じフォルダ）
-        dir_name = os.path.dirname(csv_file)
-        file_name = os.path.basename(csv_file)
-        base_name = os.path.splitext(file_name)[0]
-        xml_file = os.path.join(dir_name, f"{base_name}.xml")
-        
-        try:
-            # 変換実行
-            result_file = csv_to_xml(csv_file, xml_file)
-            # 完了メッセージダイアログを表示
-            messagebox.showinfo("変換完了", f"CSVからXMLへの変換が完了しました。\n出力ファイル: {result_file}")
-            
-        except Exception as e:
-            # エラーメッセージダイアログを表示
-            messagebox.showerror("エラー", f"変換中にエラーが発生しました。\n{str(e)}")
-            print(f"エラー: {str(e)}")
-    
-    def create_template():
-        template_file = update_csv_template()
-        messagebox.showinfo("テンプレート作成", f"CSVテンプレートファイルを作成しました。\n{template_file}")
-    
-    # フレームを作成
-    frame = tk.Frame(root, padx=20, pady=20)
-    frame.pack(expand=True, fill="both")
-    
-    # アプリの説明ラベル
-    label = tk.Label(frame, text="TestLink用CSVをXMLに変換するツール", font=("Helvetica", 12))
-    label.pack(pady=10)
-    
-    # 変換ボタン
-    convert_button = tk.Button(frame, text="CSVファイルを選択して変換", command=select_file, width=25)
-    convert_button.pack(pady=5)
-    
-    # テンプレート作成ボタン
-    template_button = tk.Button(frame, text="CSVテンプレートを作成", command=create_template, width=25)
-    template_button.pack(pady=5)
-    
-    # 終了ボタン
-    quit_button = tk.Button(frame, text="終了", command=root.destroy, width=25)
-    quit_button.pack(pady=5)
-    
-    # メインループ
-    root.mainloop()
+    # ファイル選択ダイアログを表示
+    csv_file = filedialog.askopenfilename(
+        title="TestLinkのCSVファイルを選択してください",
+        filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")]
+    )
     
     if not csv_file:  # ユーザーがキャンセルした場合
         print("ファイル選択がキャンセルされました。")

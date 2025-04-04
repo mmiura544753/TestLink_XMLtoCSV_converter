@@ -37,8 +37,8 @@ def xml_to_csv(xml_file, csv_file):
     tree = ET.parse(xml_file)
     root = tree.getroot()
     
-    # CSVヘッダー
-    headers = ['testsuite_name', 'testcase_name', 'summary', 'preconditions', 
+    # CSVヘッダー（externalidを追加）
+    headers = ['testsuite_name', 'testcase_name', 'externalid', 'summary', 'preconditions', 
                'execution_type', 'importance', 'step_number', 'actions', 'expected_results']
     
     # Shift-JISエンコードでCSVファイルを書き込み
@@ -52,6 +52,9 @@ def xml_to_csv(xml_file, csv_file):
         # テストケースを処理
         for testcase in root.findall('.//testcase'):
             testcase_name = testcase.attrib.get('name', '')
+            
+            # externalidを取得
+            externalid = testcase.find('externalid').text.replace("<![CDATA[", "").replace("]]>", "") if testcase.find('externalid') is not None else ''
             
             # 基本情報を取得
             summary = clean_html(testcase.find('summary').text if testcase.find('summary') is not None else '')
@@ -71,6 +74,7 @@ def xml_to_csv(xml_file, csv_file):
                     writer.writerow({
                         'testsuite_name': testsuite_name,
                         'testcase_name': testcase_name,
+                        'externalid': externalid,
                         'summary': summary,
                         'preconditions': preconditions,
                         'execution_type': execution_type,
@@ -84,6 +88,7 @@ def xml_to_csv(xml_file, csv_file):
                 writer.writerow({
                     'testsuite_name': testsuite_name,
                     'testcase_name': testcase_name,
+                    'externalid': externalid,
                     'summary': summary,
                     'preconditions': preconditions,
                     'execution_type': execution_type,
