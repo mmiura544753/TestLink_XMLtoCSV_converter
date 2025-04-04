@@ -5,6 +5,7 @@ import html
 import os
 import tkinter as tk
 from tkinter import filedialog
+from tkinter import messagebox
 
 def clean_html(text):
     """HTMLタグを削除し、プレーンテキストを抽出する"""
@@ -40,7 +41,8 @@ def xml_to_csv(xml_file, csv_file):
     headers = ['testsuite_name', 'testcase_name', 'summary', 'preconditions', 
                'execution_type', 'importance', 'step_number', 'actions', 'expected_results']
     
-    with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+    # Shift-JISエンコードでCSVファイルを書き込み
+    with open(csv_file, 'w', newline='', encoding='shift_jis', errors='replace') as f:
         writer = csv.DictWriter(f, fieldnames=headers)
         writer.writeheader()
         
@@ -120,17 +122,11 @@ def main():
         print(f"変換完了: {xml_file} -> {result_file}")
         
         # 完了メッセージダイアログを表示
-        result_root = tk.Tk()
-        result_root.withdraw()
-        tk.messagebox.showinfo("変換完了", f"XMLからCSVへの変換が完了しました。\n出力ファイル: {result_file}")
-        result_root.destroy()
+        messagebox.showinfo("変換完了", f"XMLからCSVへの変換が完了しました。\n出力ファイル: {result_file}")
         
     except Exception as e:
         # エラーメッセージダイアログを表示
-        error_root = tk.Tk()
-        error_root.withdraw()
-        tk.messagebox.showerror("エラー", f"変換中にエラーが発生しました。\n{str(e)}")
-        error_root.destroy()
+        messagebox.showerror("エラー", f"変換中にエラーが発生しました。\n{str(e)}")
         print(f"エラー: {str(e)}")
 
 if __name__ == "__main__":
