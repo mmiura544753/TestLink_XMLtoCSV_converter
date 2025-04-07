@@ -7,6 +7,7 @@ import csv
 import re
 import codecs
 import traceback
+import random
 
 class TestLinkConverter:
     def __init__(self, root):
@@ -110,8 +111,9 @@ class TestLinkConverter:
             messagebox.showinfo("変換完了", f"XMLファイルに変換しました:\n{output_file}")
             
         except Exception as e:
+            error_details = traceback.format_exc()
             self.update_status(f"エラー: {str(e)}")
-            messagebox.showerror("エラー", f"変換中にエラーが発生しました:\n{str(e)}")
+            messagebox.showerror("エラー", f"変換中にエラーが発生しました:\n{str(e)}\n\n詳細:\n{error_details}")
     
     def convert_xml_to_csv(self, root, output_file):
         """XMLデータをCSVに変換する"""
@@ -216,7 +218,9 @@ class TestLinkConverter:
             # XMLツリーを構築
             # ルート要素を作成
             testsuite_name = rows[1][testsuite_name_idx]
-            root = ET.Element("testsuite", attrib={"name": testsuite_name})
+            # テストスイートIDを生成（ない場合はランダムな値を使用）
+            testsuite_id = str(random.randint(1, 1000))
+            root = ET.Element("testsuite", attrib={"id": testsuite_id, "name": testsuite_name})
             
             # ノード順序を追加
             node_order = ET.SubElement(root, "node_order")
@@ -260,7 +264,8 @@ class TestLinkConverter:
                 
                 # サマリ
                 summary = ET.SubElement(testcase, "summary")
-                summary.text = ET.CDATA(f"<p>{first_row[summary_idx]}</p>\n")
+                summary_text = self.ensure_paragraph_tags(first_row[summary_idx])
+                summary.text = ET.CDATA(f"{summary_text}\n")
                 
                 # 事前条件
                 preconditions = ET.SubElement(testcase, "preconditions")
@@ -314,16 +319,13 @@ class TestLinkConverter:
                         step_exec_type.text = ET.CDATA(row[exec_type_idx])
             
             # XMLファイルの書き込み
-            tree = ET.ElementTree(root)
-            
-            # XMLファイルへの書き込み前に、文字列化してCDATAセクションを正しくフォーマット
             xml_str = '<?xml version="1.0" encoding="UTF-8"?>\n' + self.element_to_string(root)
             
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(xml_str)
                 
         except Exception as e:
-            raise Exception(f"CSVをXMLに変換中にエラーが発生: {str(e)}")
+            raise Exception(f"CSVをXMLに変換中にエラーが発生: {str(e)}\n{traceback.format_exc()}")
     
     def get_element_text(self, element, tag_name):
         """指定されたタグの要素テキストを取得する"""
@@ -356,28 +358,52 @@ class TestLinkConverter:
         # その他のHTMLタグを削除
         text = re.sub(r'<[^>]+>', '', text)
         
+        # HTMLエンティティをデコード
+        text = text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+        
         # 余分な改行を削除
         text = re.sub(r'\n+', '\n', text)
         
-        return text
+        return text.strip()
+    
+    def ensure_paragraph_tags(self, text):
+        """テキストが<p>タグで囲まれていることを確認する"""
+        if not text:
+            return "<p></p>"
+        
+        text = text.strip()
+        
+        # 既に<p>タグで囲まれている場合はそのまま返す
+        if text.startswith("<p>") and text.endswith("</p>"):
+            return text
+        
+        # <p>タグで囲む
+        return f"<p>{text}</p>"
     
     def text_to_html(self, text):
         """プレーンテキストをHTML形式に変換する"""
         if not text:
             return ""
         
-        # 改行を<p>タグに変換
+        # HTMLエンティティをデコード（CSVから読み込んだデータに含まれる可能性がある）
+        text = text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+        
+        # すでにHTMLタグが含まれている場合はそのまま返す
+        if re.search(r'<[a-z]+>', text):
+            return text
+            
+        # 改行を分割
         paragraphs = text.split('\n')
         html_paragraphs = []
         
         for p in paragraphs:
             if p.startswith('・'):
                 # ・で始まる行は<li>タグに変換
-                li_text = p[1:]  # ・を削除
+                li_text = p[1:].strip()  # ・を削除
                 html_paragraphs.append(f"<li>{li_text}</li>")
             elif p.strip():
                 # 空でない行は<p>タグで囲む
-                html_paragraphs.append(f"<p>{p}</p>")
+                html_paragraphs.append(f"<p>{p.strip()}</p>")
         
         # <li>タグが含まれる場合は<ol>タグで囲む
         html = ""
@@ -404,29 +430,31 @@ class TestLinkConverter:
         fixed_content = re.sub(pattern, r'<![CDATA[\1]]>', xml_content, flags=re.DOTALL)
         return fixed_content
     
-    def element_to_string(self, element):
+    def element_to_string(self, element, indent=""):
         """ElementTreeの要素を文字列に変換（CDATAセクションを正しく処理）"""
         tag = element.tag
         attrib_str = ""
         if element.attrib:
             attrib_str = " " + " ".join(f'{k}="{v}"' for k, v in element.attrib.items())
         
-        result = f"<{tag}{attrib_str}>"
+        result = f"{indent}<{tag}{attrib_str}>"
         
         if element.text and isinstance(element.text, ET._ElementUnicodeResult):
             # CDATAセクションの処理
             cdata_content = element.text
-            result += f"\n<![CDATA[{cdata_content}]]>\n"
-        elif element.text:
+            result += f"\n{indent}\t<![CDATA[{cdata_content}]]>\n{indent}"
+        elif element.text and element.text.strip():
             result += element.text
         
-        for child in element:
-            result += self.element_to_string(child)
+        has_children = len(element) > 0
         
-        result += f"</{tag}>"
-        
-        if element.tail:
-            result += element.tail
+        if has_children:
+            result += "\n"
+            for child in element:
+                result += self.element_to_string(child, indent + "\t") + "\n"
+            result += f"{indent}</{tag}>"
+        else:
+            result += f"</{tag}>"
         
         return result
 
