@@ -134,7 +134,7 @@ class TestLinkConverter:
         
         # 各テストケースを処理
         for testcase in root.findall(".//testcase"):
-            testcase_id = self.get_element_text(testcase, "internalid")
+            testcase_id = testcase.get("internalid", "")
             external_id = self.get_element_text(testcase, "externalid")
             version = self.get_element_text(testcase, "version")
             testcase_name = testcase.get("name", "")
