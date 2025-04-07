@@ -416,30 +416,47 @@ class TestLinkConverter:
         """HTMLタグを適切に処理してプレーンテキストに変換する"""
         if not text:
             return ""
-        
+
         # CDATAタグが残っている場合は除去（二重CDATAの場合に発生する可能性がある）
         text = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', text, flags=re.DOTALL)
-        
+
         # <p>タグは改行に変換
-        text = re.sub(r'<p>(.*?)</p>', r'\1\n', text, flags=re.DOTALL)
-        
-        # <ol>と<ul>タグは削除
-        text = re.sub(r'<ol>|</ol>|<ul>|</ul>', '', text)
-        
-        # <li>タグは・に変換
-        text = re.sub(r'<li>(.*?)</li>', r'・\1\n', text, flags=re.DOTALL)
-        
-        # その他のHTMLタグを削除
-        text = re.sub(r'<[^>]+>', '', text)
-        
-        # HTMLエンティティをデコード
-        text = text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
-        
-        # 余分な改行を削除
-        text = re.sub(r'\n+', '\n', text)
-        
-        return text.strip()
-    
+        # 注意: <p>&nbsp;</p> のような空の段落も改行に変換される
+        text = re.sub(r'<p>(.*?)</p>', r'\1\n', text, flags=re.DOTALL | re.IGNORECASE) # IGNORECASE を追加
+
+        # <br> タグも改行に変換
+        text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+
+        # <ol>と<ul>タグとその中の<li>タグの処理を改善
+        # まずリスト全体のHTMLを取得し、リストアイテムをプレーンテキストに変換
+        def replace_list(match):
+            list_content = match.group(1)
+            items = re.findall(r'<li.*?>(.*?)</li>', list_content, flags=re.DOTALL | re.IGNORECASE)
+            # 各アイテムのHTMLタグを除去し、先頭に「・」を付けて改行で結合
+            plain_items = ['・' + self.clean_html(item).strip() for item in items]
+            return '\n'.join(plain_items) + '\n' # リストの後にも改行を追加
+
+        text = re.sub(r'<(?:ul|ol).*?>(.*?)</(?:ul|ol)>', replace_list, text, flags=re.DOTALL | re.IGNORECASE)
+
+        # <li>タグ単体（リストタグの外にある場合など）も処理（通常は考えにくいが念のため）
+        text = re.sub(r'<li.*?>(.*?)</li>', r'・\1\n', text, flags=re.DOTALL | re.IGNORECASE)
+
+        # その他のHTMLタグを削除 (<p>, <br>, <ul>, <ol>, <li> 以外)
+        text = re.sub(r'<(?!\/?(p|br|ul|ol|li)\b)[^>]+>', '', text, flags=re.IGNORECASE)
+
+        # --- 修正箇所 ---
+        # HTMLエンティティをデコード (&nbsp; を空文字列に置換)
+        text = text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&nbsp;", "")
+        # 必要であれば他のHTMLエンティティもここに追加できます (例: .replace("&quot;", "\""))
+        # ----------------
+
+        # 連続する改行やスペースを整理
+        text = re.sub(r'[ \t]+', ' ', text) # 連続するスペースやタブを1つのスペースに
+        text = re.sub(r'\n\s*\n', '\n', text) # 複数の改行（間の空白含む）を1つの改行に
+
+        return text.strip() # 前後の空白と改行を削除して返す
+
+
     def ensure_paragraph_tags(self, text):
         """テキストが<p>タグで囲まれていることを確認する"""
         if not text:
