@@ -181,152 +181,226 @@ class TestLinkConverter:
     def convert_csv_to_xml(self, csv_file, output_file):
         """CSVデータをXMLに変換する"""
         try:
-            # CSVファイルの読み込み
+            # CSVファイルの読み込み (エラーハンドリング強化)
             rows = []
-            with codecs.open(csv_file, 'r', 'shift_jis') as f:
-                reader = csv.reader(f)
-                for row in reader:
-                    rows.append(row)
-            
+            try:
+                with codecs.open(csv_file, 'r', 'shift_jis') as f:
+                    reader = csv.reader(f)
+                    headers = next(reader) # ヘッダー行を先に取得
+                    rows.append(headers)
+                    for i, row in enumerate(reader):
+                         # 行の列数がヘッダーと一致するか確認 (より厳密なチェック)
+                         if len(row) != len(headers):
+                              print(f"警告: 行 {i+2} の列数がヘッダー ({len(headers)}列) と異なります ({len(row)}列)。スキップします。")
+                              continue
+                         rows.append(row)
+            except StopIteration: # 空のCSVファイルの場合
+                 raise ValueError("CSVファイルにヘッダー行がありません")
+            except FileNotFoundError:
+                 raise Exception(f"CSVファイルが見つかりません: {csv_file}")
+            except Exception as e:
+                 raise Exception(f"CSVファイルの読み込み中にエラーが発生しました: {str(e)}\n{traceback.format_exc()}")
+
+
             if len(rows) < 2:
-                raise ValueError("CSVファイルにデータがありません")
-            
+                # ヘッダーしかない場合もデータがないとみなす
+                raise ValueError("CSVファイルにデータ行がありません")
+
             # ヘッダー行
             headers = rows[0]
-            
-            # 必要なカラムのインデックスを取得
-            try:
-                id_idx = headers.index("ID")
-                external_id_idx = headers.index("外部ID")
-                version_idx = headers.index("バージョン")
-                testcase_name_idx = headers.index("テストケース名")
-                summary_idx = headers.index("サマリ（概要）")
-                importance_idx = headers.index("重要度")
-                preconditions_idx = headers.index("事前条件")
-                step_number_idx = headers.index("ステップ番号")
-                actions_idx = headers.index("アクション（手順）")
-                expected_idx = headers.index("期待結果")
-                exec_type_idx = headers.index("実行タイプ")
-                exec_duration_idx = headers.index("推定実行時間") if "推定実行時間" in headers else -1
-                status_idx = headers.index("ステータス") if "ステータス" in headers else -1
-                is_active_idx = headers.index("有効/無効") if "有効/無効" in headers else -1
-                is_open_idx = headers.index("開いているか") if "開いているか" in headers else -1
-                testsuite_name_idx = headers.index("親テストスイート名")
-            except ValueError as e:
-                raise ValueError(f"CSVファイルのフォーマットが正しくありません: {str(e)}")
-            
+
+            # 必要なカラムのインデックスを取得 (エラーハンドリング強化)
+            required_headers = [
+                "ID", "外部ID", "バージョン", "テストケース名", "サマリ（概要）",
+                "重要度", "事前条件", "ステップ番号", "アクション（手順）", "期待結果",
+                "実行タイプ", "親テストスイート名"
+            ]
+            optional_headers = ["推定実行時間", "ステータス", "有効/無効", "開いているか"]
+            header_indices = {}
+            missing_headers = []
+
+            for header in required_headers:
+                 try:
+                     header_indices[header] = headers.index(header)
+                 except ValueError:
+                     missing_headers.append(header)
+
+            if missing_headers:
+                 raise ValueError(f"CSVファイルに必要なヘッダーが見つかりません: {', '.join(missing_headers)}")
+
+            for header in optional_headers:
+                 try:
+                     header_indices[header] = headers.index(header)
+                 except ValueError:
+                     header_indices[header] = -1 # 見つからない場合は -1
+
+            # インデックスを変数に展開
+            id_idx = header_indices["ID"]
+            external_id_idx = header_indices["外部ID"]
+            version_idx = header_indices["バージョン"]
+            testcase_name_idx = header_indices["テストケース名"]
+            summary_idx = header_indices["サマリ（概要）"]
+            importance_idx = header_indices["重要度"]
+            preconditions_idx = header_indices["事前条件"]
+            step_number_idx = header_indices["ステップ番号"]
+            actions_idx = header_indices["アクション（手順）"]
+            expected_idx = header_indices["期待結果"]
+            exec_type_idx = header_indices["実行タイプ"]
+            testsuite_name_idx = header_indices["親テストスイート名"]
+            exec_duration_idx = header_indices["推定実行時間"]
+            status_idx = header_indices["ステータス"]
+            is_active_idx = header_indices["有効/無効"]
+            is_open_idx = header_indices["開いているか"]
+
+
             # XMLツリーを構築
-            # ルート要素を作成
+            # ルート要素を作成 (CSVが空でないことを確認済み)
             testsuite_name = rows[1][testsuite_name_idx]
-            # テストスイートIDを生成（ない場合はランダムな値を使用）
             testsuite_id = str(random.randint(1, 1000))
             root = ET.Element("testsuite", attrib={"id": testsuite_id, "name": testsuite_name})
-            
+
             # ノード順序を追加
             node_order = ET.SubElement(root, "node_order")
-            node_order.text = ET.CDATA("1")
-            
+            # ET.CDATA の呼び出しを削除し、単純な文字列を代入
+            node_order.text = "1" # <--- 修正
+
             # 詳細を追加
             details = ET.SubElement(root, "details")
-            details.text = ET.CDATA("")
-            
+            # ET.CDATA の呼び出しを削除し、単純な文字列を代入
+            details.text = "" # <--- 修正
+
             # テストケースをグループ化
             testcase_groups = {}
             for i in range(1, len(rows)):
                 row = rows[i]
+                # ID列が存在するかチェック (IndexError防止)
+                if len(row) <= id_idx:
+                     print(f"警告: 行 {i+1} のデータが不足しています（ID列なし）。スキップします。")
+                     continue
                 testcase_id = row[id_idx]
                 if testcase_id not in testcase_groups:
                     testcase_groups[testcase_id] = []
                 testcase_groups[testcase_id].append(row)
-            
+
             # 各テストケースを追加
             node_order_index = 0
             for testcase_id, testcase_rows in testcase_groups.items():
+                if not testcase_rows: continue # 空のグループはスキップ
                 first_row = testcase_rows[0]
-                
+
+                # --- 必要な列が存在するかチェック (IndexError防止) ---
+                required_indices_for_tc = [id_idx, testcase_name_idx, external_id_idx, version_idx, summary_idx, preconditions_idx, exec_type_idx, importance_idx]
+                if any(idx >= len(first_row) for idx in required_indices_for_tc):
+                     print(f"警告: テストケース ID {testcase_id} の最初の行に必要なデータが不足しています。スキップします。")
+                     continue
+                # --- チェック完了 ---
+
                 testcase = ET.SubElement(root, "testcase", attrib={
                     "internalid": first_row[id_idx],
                     "name": first_row[testcase_name_idx]
                 })
-                
+
                 # 順序情報
                 tc_node_order = ET.SubElement(testcase, "node_order")
-                tc_node_order.text = ET.CDATA(str(node_order_index))
+                # ET.CDATA の呼び出しを削除
+                tc_node_order.text = str(node_order_index) # <--- 修正
                 node_order_index += 1
-                
+
                 # 外部ID
                 external_id = ET.SubElement(testcase, "externalid")
-                external_id.text = ET.CDATA(first_row[external_id_idx])
-                
+                 # ET.CDATA の呼び出しを削除
+                external_id.text = first_row[external_id_idx] # <--- 修正
+
                 # バージョン
                 version = ET.SubElement(testcase, "version")
-                version.text = ET.CDATA(first_row[version_idx])
-                
+                # ET.CDATA の呼び出しを削除
+                version.text = first_row[version_idx] # <--- 修正
+
                 # サマリ
                 summary = ET.SubElement(testcase, "summary")
                 summary_text = self.ensure_paragraph_tags(first_row[summary_idx])
-                summary.text = ET.CDATA(f"{summary_text}\n")
-                
+                # ET.CDATA の呼び出しを削除
+                summary.text = f"{summary_text}\n" # <--- 修正 (末尾の改行はTestLinkフォーマットに合わせるため)
+
                 # 事前条件
                 preconditions = ET.SubElement(testcase, "preconditions")
-                preconditions.text = ET.CDATA(self.text_to_html(first_row[preconditions_idx]))
-                
+                # ET.CDATA の呼び出しを削除
+                preconditions.text = self.text_to_html(first_row[preconditions_idx]) # <--- 修正
+
                 # 実行タイプ
                 exec_type = ET.SubElement(testcase, "execution_type")
-                exec_type.text = ET.CDATA(first_row[exec_type_idx])
-                
+                # ET.CDATA の呼び出しを削除
+                exec_type.text = first_row[exec_type_idx] # <--- 修正
+
                 # 重要度
                 importance = ET.SubElement(testcase, "importance")
-                importance.text = ET.CDATA(first_row[importance_idx])
-                
-                # 推定実行時間
-                if exec_duration_idx >= 0:
+                # ET.CDATA の呼び出しを削除
+                importance.text = first_row[importance_idx] # <--- 修正
+
+                # 推定実行時間 (オプション)
+                if exec_duration_idx != -1 and exec_duration_idx < len(first_row):
                     exec_duration = ET.SubElement(testcase, "estimated_exec_duration")
                     exec_duration.text = first_row[exec_duration_idx]
-                
-                # ステータス
-                if status_idx >= 0:
+
+                # ステータス (オプション)
+                if status_idx != -1 and status_idx < len(first_row):
                     status = ET.SubElement(testcase, "status")
                     status.text = first_row[status_idx]
-                
-                # 開いているか
-                if is_open_idx >= 0:
+
+                # 開いているか (オプション)
+                if is_open_idx != -1 and is_open_idx < len(first_row):
                     is_open = ET.SubElement(testcase, "is_open")
                     is_open.text = first_row[is_open_idx]
-                
-                # 有効/無効
-                if is_active_idx >= 0:
+
+                # 有効/無効 (オプション)
+                if is_active_idx != -1 and is_active_idx < len(first_row):
                     is_active = ET.SubElement(testcase, "active")
                     is_active.text = first_row[is_active_idx]
-                
+
                 # ステップを追加
                 steps = ET.SubElement(testcase, "steps")
-                for row in testcase_rows:
-                    step_number = row[step_number_idx]
-                    if step_number:
+                for row_idx, row in enumerate(testcase_rows):
+                     # --- 必要な列が存在するかチェック (IndexError防止) ---
+                     required_indices_for_step = [step_number_idx, actions_idx, expected_idx, exec_type_idx]
+                     if any(idx >= len(row) for idx in required_indices_for_step):
+                           print(f"警告: テストケース ID {testcase_id} のステップ {row_idx+1} に必要なデータが不足しています。スキップします。")
+                           continue
+                     # --- チェック完了 ---
+
+                     step_number = row[step_number_idx]
+                     # ステップ番号が空でない場合のみステップ要素を作成
+                     if step_number and step_number.strip():
                         step = ET.SubElement(steps, "step")
-                        
+
                         step_num_elem = ET.SubElement(step, "step_number")
-                        step_num_elem.text = ET.CDATA(step_number)
-                        
+                        # ET.CDATA の呼び出しを削除
+                        step_num_elem.text = step_number # <--- 修正
+
                         actions = ET.SubElement(step, "actions")
-                        actions.text = ET.CDATA(self.text_to_html(row[actions_idx]))
-                        
+                        # ET.CDATA の呼び出しを削除
+                        actions.text = self.text_to_html(row[actions_idx]) # <--- 修正
+
                         expected = ET.SubElement(step, "expectedresults")
-                        expected.text = ET.CDATA(self.text_to_html(row[expected_idx]))
-                        
+                        # ET.CDATA の呼び出しを削除
+                        expected.text = self.text_to_html(row[expected_idx]) # <--- 修正
+
                         step_exec_type = ET.SubElement(step, "execution_type")
-                        step_exec_type.text = ET.CDATA(row[exec_type_idx])
-            
+                        # ET.CDATA の呼び出しを削除
+                        step_exec_type.text = row[exec_type_idx] # <--- 修正
+
             # XMLファイルの書き込み
+            # 修正した element_to_string 関数を使用
             xml_str = '<?xml version="1.0" encoding="UTF-8"?>\n' + self.element_to_string(root)
-            
+
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(xml_str)
-                
+
+        except ValueError as ve: # CSVフォーマットエラーやデータ不足をキャッチ
+             raise Exception(f"CSVファイルの処理中にエラーが発生しました: {str(ve)}\n{traceback.format_exc()}")
         except Exception as e:
-            raise Exception(f"CSVをXMLに変換中にエラーが発生: {str(e)}\n{traceback.format_exc()}")
-    
+            # 予期せぬエラー
+            raise Exception(f"CSVをXMLに変換中に予期せぬエラーが発生しました: {str(e)}\n{traceback.format_exc()}")
+
     def get_element_text(self, element, tag_name):
         """指定されたタグの要素テキストを取得する"""
         tag = element.find(tag_name)
@@ -430,32 +504,66 @@ class TestLinkConverter:
         fixed_content = re.sub(pattern, r'<![CDATA[\1]]>', xml_content, flags=re.DOTALL)
         return fixed_content
     
+    # この関数内で xml.sax.saxutils を使うので、ファイルの先頭でインポートしておきます
+    # import xml.sax.saxutils
+
     def element_to_string(self, element, indent=""):
-        """ElementTreeの要素を文字列に変換（CDATAセクションを正しく処理）"""
+        """ElementTreeの要素を文字列に変換（特定のタグのみCDATAセクションとして処理）"""
         tag = element.tag
         attrib_str = ""
         if element.attrib:
             attrib_str = " " + " ".join(f'{k}="{v}"' for k, v in element.attrib.items())
-        
+
         result = f"{indent}<{tag}{attrib_str}>"
-        
-        if element.text and isinstance(element.text, ET._ElementUnicodeResult):
-            # CDATAセクションの処理
-            cdata_content = element.text
-            result += f"\n{indent}\t<![CDATA[{cdata_content}]]>\n{indent}"
-        elif element.text and element.text.strip():
-            result += element.text
-        
+
         has_children = len(element) > 0
-        
+        text_content = element.text # 元のテキストを保持
+
+        # --- ここから修正: タグ名に基づいてCDATA処理を分岐 ---
+        # CDATAで囲むべきタグ名のリスト (HTMLや複数行テキストを含む可能性があるもの)
+        # 元のXMLを参考に調整
+        cdata_tags = [
+            'summary', 'preconditions', 'actions', 'expectedresults', 'details',
+            'node_order', 'externalid', 'version', 'step_number', 'execution_type', 'importance'
+            # execution_type, importance もCDATAの場合があるため含める
+            # 'name' 属性はCDATAではないので注意
+        ]
+
+        # テキスト内容が存在する場合 (Noneでない)
+        if text_content is not None:
+            if tag in cdata_tags:
+                # CDATAが必要なタグの場合
+                escaped_text = text_content.replace(']]>', ']]]]><![CDATA[>')
+                result += f"\n{indent}\t<![CDATA[{escaped_text}]]>\n"
+                if not has_children:
+                     result += f"{indent}</{tag}>"
+            else:
+                # CDATAが不要なタグの場合 (例: status, is_open, active, estimated_exec_duration)
+                # XML特殊文字 (<, >, &) をエスケープ
+                import xml.sax.saxutils as saxutils
+                escaped_text = saxutils.escape(text_content)
+                # テキストが空文字列でない場合のみ出力 (空の<tag></tag>にする)
+                if escaped_text:
+                     result += escaped_text
+                if not has_children:
+                     result += f"</{tag}>" # 閉じタグを追加 (<tag>text</tag> or <tag></tag>)
+
+        # テキスト内容がない場合 (None)
+        else:
+             # estimated_exec_duration のような空要素は <tag></tag> とする
+             # (TestLinkは <tag/> 形式も <tag></tag> 形式も解釈できるはず)
+             if has_children:
+                  result += "\n"
+
+        # 子要素を再帰的に処理
         if has_children:
-            result += "\n"
             for child in element:
                 result += self.element_to_string(child, indent + "\t") + "\n"
             result += f"{indent}</{tag}>"
-        else:
-            result += f"</{tag}>"
-        
+        # 子要素がなく、テキストもない場合 (text_content is None)
+        elif text_content is None:
+             result += f"</{tag}>" # <tag></tag> 形式
+
         return result
 
 def main():
