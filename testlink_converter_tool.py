@@ -13,7 +13,7 @@ class TestLinkConverter:
     def __init__(self, root):
         self.root = root
         self.root.title("TestLink XML-CSV Converter")
-        self.root.geometry("400x200")
+        self.root.geometry("500x300")
         self.root.resizable(False, False)
 
         # GUI要素の作成
@@ -23,14 +23,24 @@ class TestLinkConverter:
         self.update_status("待機中")
 
     def create_widgets(self):
+        # 説明文ラベル
+        self.lbl_description = tk.Label(
+            self.root, 
+            text="このツールは、TestLinkからエクスポートしたテストケースのXMLファイルを\nCSV形式に変換したり、CSVファイルからTestLink用のXMLファイルに\n変換したりするためのユーティリティです。",
+            justify=tk.LEFT,
+            anchor="w",
+            pady=10
+        )
+        self.lbl_description.pack(fill=tk.X, padx=20)
+
         # XMLからCSV変換ボタン
         self.btn_xml_to_csv = tk.Button(self.root, text="XML→CSV変換", width=20, height=2,
-                                        command=self.process_xml_to_csv) # 呼び出す関数名を変更
+                                        command=self.process_xml_to_csv)
         self.btn_xml_to_csv.pack(pady=10)
 
         # CSVからXML変換ボタン
         self.btn_csv_to_xml = tk.Button(self.root, text="CSV→XML変換", width=20, height=2,
-                                        command=self.process_csv_to_xml) # 呼び出す関数名を変更
+                                        command=self.process_csv_to_xml)
         self.btn_csv_to_xml.pack(pady=10)
 
         # 終了ボタン
@@ -63,7 +73,7 @@ class TestLinkConverter:
             # XML内容の読み込みと修正（二重CDATAなど）
             with open(xml_file, 'r', encoding='utf-8') as f:
                 xml_content = f.read()
-            fixed_xml_content = xml_processor.fix_double_cdata(xml_content) # xml_processorの関数を使用
+            fixed_xml_content = xml_processor.fix_double_cdata(xml_content)
 
             # XMLをパースしてルート要素とテストスイート名を取得
             root_element, testsuite_name = xml_processor.parse_xml_root(fixed_xml_content)
@@ -72,7 +82,7 @@ class TestLinkConverter:
             output_file = os.path.splitext(xml_file)[0] + ".csv"
 
             # XMLからCSVへの変換処理を呼び出し
-            xml_processor.convert_xml_to_csv(root_element, testsuite_name, output_file) # xml_processorの関数を使用
+            xml_processor.convert_xml_to_csv(root_element, testsuite_name, output_file)
 
             self.update_status(f"変換完了: {output_file}")
             messagebox.showinfo("変換完了", f"CSVファイルに変換しました:\n{output_file}")
@@ -99,7 +109,7 @@ class TestLinkConverter:
             output_file = os.path.splitext(csv_file)[0] + "_converted.xml"
 
             # CSVからXMLへの変換処理を呼び出し
-            csv_processor.convert_csv_to_xml(csv_file, output_file) # csv_processorの関数を使用
+            csv_processor.convert_csv_to_xml(csv_file, output_file)
 
             self.update_status(f"変換完了: {output_file}")
             messagebox.showinfo("変換完了", f"XMLファイルに変換しました:\n{output_file}")

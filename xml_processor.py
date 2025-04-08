@@ -86,16 +86,27 @@ def convert_xml_to_csv(testcases_root, testsuite_name, output_csv_file):
     """XML要素ツリーからデータを抽出し、CSVファイルに書き込む"""
     try:
         rows = []
+        
+        # カスタムフィールドの一覧（必要なフィールドをここで定義）
+        custom_field_names = [
+            "AutomationAction", "AutomationParameters", "AutomationEnabled", 
+            "AutomationTargetNode", "AutomationValidation"
+        ]
+        
+        # ヘッダー行にカスタムフィールド名を追加
         headers = [
             "ID", "外部ID", "バージョン", "テストケース名", "サマリ（概要）",
             "重要度", "事前条件", "ステップ番号", "アクション（手順）", "期待結果",
             "実行タイプ", "推定実行時間", "ステータス", "有効/無効", "開いているか",
             "親テストスイート名"
         ]
+        # カスタムフィールドをヘッダーに追加
+        headers.extend(custom_field_names)
         rows.append(headers)
 
         # testcases_root (testsuite または testcases 要素) から testcase を検索
         for testcase in testcases_root.findall(".//testcase"):
+            # テストケース基本情報の取得
             testcase_id = testcase.get("internalid", "")
             external_id = get_element_text(testcase, "externalid")
             version = get_element_text(testcase, "version")
@@ -103,23 +114,38 @@ def convert_xml_to_csv(testcases_root, testsuite_name, output_csv_file):
             summary = clean_html(get_element_text(testcase, "summary"))
             importance = get_element_text(testcase, "importance")
             preconditions = clean_html(get_element_text(testcase, "preconditions"))
-            # execution_type は Testcase直下とStep内にある。ここではTestcase直下のものを取得
+            
+            # テストケースレベルの実行タイプ取得
             tc_exec_type_elem = testcase.find("execution_type")
             tc_exec_type = tc_exec_type_elem.text.strip() if tc_exec_type_elem is not None and tc_exec_type_elem.text else ""
 
+            # その他のテストケース属性
             exec_duration = get_element_text(testcase, "estimated_exec_duration")
             status = get_element_text(testcase, "status")
             is_active = get_element_text(testcase, "active")
             is_open = get_element_text(testcase, "is_open")
 
+            # カスタムフィールドの値を取得
+            custom_field_values = {}
+            custom_fields_elem = testcase.find("custom_fields")
+            if custom_fields_elem is not None:
+                for cf in custom_fields_elem.findall("custom_field"):
+                    cf_name = get_element_text(cf, "name")
+                    cf_value = get_element_text(cf, "value")
+                    if cf_name:
+                        custom_field_values[cf_name] = cf_value
+
             steps = testcase.find("steps")
             if steps is not None and len(steps) > 0:
+                # ステップがある場合は各ステップ毎に行を出力
                 for step in steps.findall("step"):
                     step_number = get_element_text(step, "step_number")
                     actions = clean_html(get_element_text(step, "actions"))
                     expected = clean_html(get_element_text(step, "expectedresults"))
+                    
+                    # ステップレベルの実行タイプを取得（なければテストケースのものを使用）
                     step_exec_type_elem = step.find("execution_type")
-                    step_exec_type = step_exec_type_elem.text.strip() if step_exec_type_elem is not None and step_exec_type_elem.text else ""
+                    step_exec_type = step_exec_type_elem.text.strip() if step_exec_type_elem is not None and step_exec_type_elem.text else tc_exec_type
 
                     row = [
                         testcase_id, external_id, version, testcase_name, summary,
@@ -127,15 +153,25 @@ def convert_xml_to_csv(testcases_root, testsuite_name, output_csv_file):
                         step_exec_type, exec_duration, status, is_active, is_open,
                         testsuite_name
                     ]
+                    
+                    # カスタムフィールド値を追加
+                    for cf_name in custom_field_names:
+                        row.append(custom_field_values.get(cf_name, ""))
+                    
                     rows.append(row)
             else:
-                # ステップがない場合
+                # ステップがない場合は1行のみ出力
                 row = [
                     testcase_id, external_id, version, testcase_name, summary,
                     importance, preconditions, "", "", "", # ステップ関連は空
-                    tc_exec_type, exec_duration, status, is_active, is_open, # 実行タイプはTestcaseのものを採用
+                    tc_exec_type, exec_duration, status, is_active, is_open,
                     testsuite_name
                 ]
+                
+                # カスタムフィールド値を追加
+                for cf_name in custom_field_names:
+                    row.append(custom_field_values.get(cf_name, ""))
+                
                 rows.append(row)
 
         # CSVファイル書き込み
