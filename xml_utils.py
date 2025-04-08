@@ -1,7 +1,7 @@
 import xml.sax.saxutils as saxutils
 
 def element_to_string(element, indent=""):
-    """ElementTreeの要素を整形された文字列に変換（特定のタグのみCDATA）"""
+    """ElementTreeの要素を整形された文字列に変換（TestLink形式に合わせてCDATA対応）"""
     tag = element.tag
     attrib_str = ""
     if element.attrib:
@@ -17,19 +17,29 @@ def element_to_string(element, indent=""):
          result += "></" + tag + ">" # 空要素 <tag></tag>
          return result
 
-    # CDATAで囲むべきタグ
-    cdata_tags = ['summary', 'preconditions', 'actions', 'expectedresults', 'details']
+    # 常にCDATAで囲むタグ
+    html_tags = ['summary', 'preconditions', 'actions', 'expectedresults', 'details']
+    # 値があればCDATAで囲むタグ
+    cdata_tags = [
+        'node_order', 'externalid', 'version', 'step_number', 
+        'execution_type', 'importance', 'status', 
+        'is_open', 'active', 'name', 'value'
+    ]
 
     if text_content is not None:
         # テキストをエスケープするかCDATAで囲む
         stripped_text = text_content # strip() しないで元のテキストを保持
         if stripped_text:
-            if tag in cdata_tags:
-                # CDATA終了区切り文字のエスケープ
+            if tag in html_tags:
+                # HTML要素はCDATAで囲む
+                escaped_text = stripped_text.replace(']]>', ']]]]><![CDATA[>')
+                result += f"<![CDATA[{escaped_text}]]>"
+            elif tag in cdata_tags:
+                # 通常値もCDATAで囲む（TestLink形式に合わせる）
                 escaped_text = stripped_text.replace(']]>', ']]]]><![CDATA[>')
                 result += f"<![CDATA[{escaped_text}]]>"
             else:
-                # 通常のテキストはXMLエスケープ
+                # それ以外のテキストはXMLエスケープ
                 result += saxutils.escape(stripped_text)
 
     if has_children:

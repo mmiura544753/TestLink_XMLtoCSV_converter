@@ -41,7 +41,14 @@ def get_header_indices(headers):
         "ステップ番号", "アクション（手順）", "期待結果", "実行タイプ"
     ]
     # IDと外部IDは必須ではない（新規作成のため）
-    optional_headers = ["ID", "外部ID",  "事前条件", "推定実行時間", "ステータス", "有効/無効", "開いているか", "親テストスイート名"]
+    optional_headers = ["ID", "外部ID", "事前条件", "推定実行時間", "ステータス", "有効/無効", "開いているか", "親テストスイート名"]
+    
+    # カスタムフィールドのリスト
+    custom_field_headers = [
+        "AutomationAction", "AutomationParameters", "AutomationEnabled", 
+        "AutomationTargetNode", "AutomationValidation"
+    ]
+    
     header_indices = {}
     missing_required = []
     for header in required_headers:
@@ -57,5 +64,15 @@ def get_header_indices(headers):
             header_indices[header] = headers.index(header)
         except ValueError:
             header_indices[header] = -1 # 見つからない場合は -1
+    
+    # カスタムフィールドのインデックスを取得
+    header_indices["custom_fields"] = {}
+    for cf_header in custom_field_headers:
+        try:
+            cf_index = headers.index(cf_header)
+            header_indices["custom_fields"][cf_header] = cf_index
+        except ValueError:
+            # カスタムフィールドは見つからない場合も問題ない
+            pass
             
     return header_indices

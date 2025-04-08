@@ -53,6 +53,9 @@ def build_testcase_element(root, testcase_rows, header_indices):
     is_active_idx = header_indices.get("有効/無効", -1)
     is_open_idx = header_indices.get("開いているか", -1)
     
+    # カスタムフィールドのインデックス
+    custom_fields_indices = header_indices.get("custom_fields", {})
+    
     first_row = testcase_rows[0]
 
     # 必須データの存在チェック
@@ -70,19 +73,25 @@ def build_testcase_element(root, testcase_rows, header_indices):
     if missing_data:
         return
 
-    # <testcase> 要素の属性を設定
-    tc_attributes = {"name": first_row[testcase_name_idx].strip()}
+    # <testcase> 要素の属性を設定 (順序を合わせる)
     current_internal_id = first_row[id_idx].strip() if id_idx != -1 and id_idx < len(first_row) else ""
+    tc_attributes = {}
     if current_internal_id:
         tc_attributes["internalid"] = current_internal_id
+    tc_attributes["name"] = first_row[testcase_name_idx].strip()
 
     testcase = ET.SubElement(root, "testcase", attrib=tc_attributes)
 
-    # <externalid> (値があれば追加)
+    # TestLink形式に合わせて要素を追加（順序を保持）
+    
+    # <node_order>
+    node_order = ET.SubElement(testcase, "node_order")
+    node_order.text = "0"  # デフォルト値として0を設定
+    
+    # <externalid>
     external_id_text = first_row[external_id_idx].strip() if external_id_idx != -1 and external_id_idx < len(first_row) else ""
-    if external_id_text:
-        external_id_elem = ET.SubElement(testcase, "externalid")
-        external_id_elem.text = external_id_text
+    external_id_elem = ET.SubElement(testcase, "externalid")
+    external_id_elem.text = external_id_text
 
     # <version>
     version_text = first_row[version_idx].strip() if version_idx < len(first_row) else "1"
@@ -99,46 +108,77 @@ def build_testcase_element(root, testcase_rows, header_indices):
     preconditions = ET.SubElement(testcase, "preconditions")
     preconditions.text = text_to_html(preconditions_text)
 
-    # <execution_type> (Testcaseレベル)
+    # <execution_type> (Testcaseレベル) - 常に追加
     tc_exec_type_text = first_row[exec_type_idx].strip() if exec_type_idx < len(first_row) else "1" # デフォルト Manual
-    # ステップが存在するかの確認
-    has_steps = any(row[step_number_idx].strip() for row in testcase_rows if step_number_idx != -1 and step_number_idx < len(row))
-    if not has_steps: # ステップがなければTestcaseレベルの実行タイプを設定
-         exec_type_elem = ET.SubElement(testcase, "execution_type")
-         exec_type_elem.text = tc_exec_type_text
+    exec_type_elem = ET.SubElement(testcase, "execution_type")
+    exec_type_elem.text = tc_exec_type_text
 
     # <importance>
     importance_text = first_row[importance_idx].strip() if importance_idx < len(first_row) else "2" # デフォルト Medium
     importance = ET.SubElement(testcase, "importance")
     importance.text = importance_text
 
-    # オプショナル要素 (値があれば追加)
-    add_optional_elements(testcase, first_row, header_indices)
+    # <estimated_exec_duration> - 常に追加（空でも）
+    exec_duration = ET.SubElement(testcase, "estimated_exec_duration")
+    if exec_duration_idx != -1 and exec_duration_idx < len(first_row) and first_row[exec_duration_idx].strip():
+        exec_duration.text = first_row[exec_duration_idx].strip()
 
-    # <steps> 要素
+    # <status>
+    if status_idx != -1 and status_idx < len(first_row) and first_row[status_idx].strip():
+        status = ET.SubElement(testcase, "status")
+        status.text = first_row[status_idx].strip()
+    else:
+        # デフォルト値として1を設定
+        status = ET.SubElement(testcase, "status")
+        status.text = "1"
+
+    # <is_open>
+    if is_open_idx != -1 and is_open_idx < len(first_row) and first_row[is_open_idx].strip():
+        is_open = ET.SubElement(testcase, "is_open")
+        is_open.text = first_row[is_open_idx].strip()
+    else:
+        # デフォルト値として1を設定
+        is_open = ET.SubElement(testcase, "is_open")
+        is_open.text = "1"
+
+    # <active>
+    if is_active_idx != -1 and is_active_idx < len(first_row) and first_row[is_active_idx].strip():
+        active = ET.SubElement(testcase, "active")
+        active.text = first_row[is_active_idx].strip()
+    else:
+        # デフォルト値として1を設定
+        active = ET.SubElement(testcase, "active")
+        active.text = "1"
+
+    # <steps> 要素 - TestLinkの順序に合わせる
     build_steps_elements(testcase, testcase_rows, header_indices)
+    
+    # カスタムフィールドの追加 - TestLinkの順序に合わせてstepsの後
+    if custom_fields_indices:
+        has_custom_fields = False
+        custom_fields_container = ET.SubElement(testcase, "custom_fields")
+        
+        for cf_name, cf_idx in custom_fields_indices.items():
+            cf_value = first_row[cf_idx].strip() if cf_idx < len(first_row) else ""
+            if cf_value:  # 値がある場合のみ追加
+                has_custom_fields = True
+                custom_field = ET.SubElement(custom_fields_container, "custom_field")
+                
+                name_elem = ET.SubElement(custom_field, "name")
+                name_elem.text = cf_name
+                
+                value_elem = ET.SubElement(custom_field, "value")
+                value_elem.text = cf_value
+        
+        # カスタムフィールド要素が空の場合は削除
+        if not has_custom_fields:
+            testcase.remove(custom_fields_container)
     
     return testcase
 
 def add_optional_elements(testcase, row, header_indices):
-    """オプショナル要素を追加する"""
-    exec_duration_idx = header_indices.get("推定実行時間", -1)
-    status_idx = header_indices.get("ステータス", -1)
-    is_open_idx = header_indices.get("開いているか", -1)
-    is_active_idx = header_indices.get("有効/無効", -1)
-    
-    if exec_duration_idx != -1 and exec_duration_idx < len(row) and row[exec_duration_idx].strip():
-        exec_duration = ET.SubElement(testcase, "estimated_exec_duration")
-        exec_duration.text = row[exec_duration_idx].strip()
-    if status_idx != -1 and status_idx < len(row) and row[status_idx].strip():
-        status = ET.SubElement(testcase, "status")
-        status.text = row[status_idx].strip()
-    if is_open_idx != -1 and is_open_idx < len(row) and row[is_open_idx].strip():
-        is_open = ET.SubElement(testcase, "is_open")
-        is_open.text = row[is_open_idx].strip()
-    if is_active_idx != -1 and is_active_idx < len(row) and row[is_active_idx].strip():
-        active = ET.SubElement(testcase, "active")
-        active.text = row[is_active_idx].strip()
+    """オプショナル要素を追加する - 現在は使用していない（必要な要素は直接build_testcase_elementに記述）"""
+    pass
 
 def build_steps_elements(testcase, testcase_rows, header_indices):
     """ステップ要素を構築する"""
@@ -171,6 +211,10 @@ def build_steps_elements(testcase, testcase_rows, header_indices):
             expected.text = text_to_html(expected_text)
             step_exec_type = ET.SubElement(step, "execution_type")
             step_exec_type.text = step_exec_type_text
+
+    # ステップがない場合はsteps要素を削除
+    if not len(steps_container):
+        testcase.remove(steps_container)
 
 def create_root_element():
     """ルートのXML要素を作成する"""
